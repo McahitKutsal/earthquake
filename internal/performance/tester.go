@@ -5,6 +5,8 @@ import (
 	"context"
 	"earthquake/internal/config"
 	"earthquake/internal/database"
+	"earthquake/pkg/logger"
+	"earthquake/pkg/utils"
 	"fmt"
 	"net/http"
 	"sync"
@@ -32,18 +34,21 @@ type Result struct {
 }
 
 type TestSummary struct {
-	TotalRequests int           `json:"total_requests"`
-	Success       int           `json:"success"`
-	Failures      int           `json:"failures"`
-	SuccessRate   float64       `json:"success_rate"`
-	FailureRate   float64       `json:"failure_rate"`
-	TotalTime     time.Duration `json:"total_time"`
-	AverageTime   time.Duration `json:"average_time"`
-	StatusCodes   map[int]int   `json:"status_codes"`
-	Results       []Result      `json:"results"`
+	TotalRequests int         `json:"total_requests"`
+	Success       int         `json:"success"`
+	Failures      int         `json:"failures"`
+	SuccessRate   float64     `json:"success_rate"`
+	FailureRate   float64     `json:"failure_rate"`
+	TotalTime     string      `json:"total_time"`
+	AverageTime   string      `json:"average_time"`
+	StatusCodes   map[int]int `json:"status_codes"`
+	Results       []Result    `json:"results"`
 }
 
 func ExecuteTest(cfg config.Config) TestSummary {
+
+	logger.LogInfo(fmt.Sprintf("Test Started: Requests, %d Threads, %d", cfg.Requests, cfg.Concurrency))
+
 	results := make(chan Result, cfg.Requests)
 	var wg sync.WaitGroup
 
@@ -125,8 +130,8 @@ func ExecuteTest(cfg config.Config) TestSummary {
 		Failures:      failures,
 		SuccessRate:   successRate,
 		FailureRate:   failureRate,
-		TotalTime:     totalTime,
-		AverageTime:   averageTime,
+		TotalTime:     utils.FormatDuration(totalTime),   // Total time formatted as "hh:mm:ss"
+		AverageTime:   utils.FormatDuration(averageTime), // Average time formatted as "hh:mm:ss"
 		StatusCodes:   statusCodes,
 		Results:       testResults,
 	}
@@ -153,7 +158,8 @@ func RunTest(cfg config.Config, id primitive.ObjectID) TestResult {
 	if err != nil {
 		panic(err) // Replace with better error handling
 	}
-	fmt.Println("done")
+
+	logger.LogInfo(fmt.Sprintf("Done %s", id.Hex()))
 
 	return result
 }
