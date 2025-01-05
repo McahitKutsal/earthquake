@@ -34,7 +34,7 @@ func main() {
 	database.Connect(mongoURI)
 
 	// Routes
-	http.HandleFunc("/test", handlers.HandleTestRequest) //Here I dont want it to make client wait untill all performance tests done, just return test Id then query it accordingly
+	http.HandleFunc("/test", handlers.HandleTestRequest) 
 	http.HandleFunc("/result", handlers.GetTestResult)
 
 	serverAddress := fmt.Sprintf("http://localhost:%s", port)

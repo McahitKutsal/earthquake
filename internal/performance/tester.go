@@ -3,8 +3,8 @@ package performance
 import (
 	"bytes"
 	"context"
-	"earthquake/internal/config"
 	"earthquake/internal/database"
+	"earthquake/internal/models"
 	"earthquake/pkg/logger"
 	"earthquake/pkg/utils"
 	"fmt"
@@ -15,50 +15,23 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type TestResult struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty"`
-	Endpoint    string             `bson:"endpoint"`
-	Concurrency int                `bson:"concurrency"`
-	Requests    int                `bson:"requests"`
-	Method      string             `bson:"method"`
-	Headers     map[string]string  `bson:"headers"`
-	Body        string             `bson:"body"`
-	TestSummary TestSummary        `bson:"test_summary"`
-	CreatedAt   time.Time          `bson:"created_at"`
-}
+func ExecuteTest(testRequest models.TestRequest) models.TestSummary {
 
-type Result struct {
-	StatusCode int           `json:"status_code"`
-	Duration   time.Duration `json:"duration"`
-	Error      string        `json:"error,omitempty"`
-}
-
-type TestSummary struct {
-	TotalRequests int         `json:"total_requests"`
-	Success       int         `json:"success"`
-	Failures      int         `json:"failures"`
-	SuccessRate   float64     `json:"success_rate"`
-	FailureRate   float64     `json:"failure_rate"`
-	TotalTime     string      `json:"total_time"`
-	AverageTime   string      `json:"average_time"`
-	StatusCodes   map[int]int `json:"status_codes"`
-	Results       []Result    `json:"results"`
-}
-
-func ExecuteTest(cfg config.Config) TestSummary {
-
-	logger.LogInfo(fmt.Sprintf("Test Started: Requests, %d Threads, %d", cfg.Requests, cfg.Concurrency))
-
-	results := make(chan Result, cfg.Requests)
+	results := make(chan models.RequestResult, testRequest.Requests)
 	var wg sync.WaitGroup
 
 	startTime := time.Now()
 
+	if testRequest.Requests < testRequest.Concurrency {
+		testRequest.Concurrency = testRequest.Requests
+	}
 	// Calculate base requests per goroutine and the remainder
-	baseRequests := cfg.Requests / cfg.Concurrency
-	remainder := cfg.Requests % cfg.Concurrency
+	baseRequests := testRequest.Requests / testRequest.Concurrency
+	remainder := testRequest.Requests % testRequest.Concurrency
 
-	for i := 0; i < cfg.Concurrency; i++ {
+	logger.LogInfo(fmt.Sprintf("Test Started: Requests, %d Threads, %d", testRequest.Requests, testRequest.Concurrency))
+
+	for i := 0; i < testRequest.Concurrency; i++ {
 		wg.Add(1)
 
 		// Determine how many requests this goroutine should handle
@@ -72,21 +45,21 @@ func ExecuteTest(cfg config.Config) TestSummary {
 			client := &http.Client{}
 			for j := 0; j < requestCount; j++ {
 				start := time.Now()
-				req, err := http.NewRequest(cfg.Method, cfg.Endpoint, bytes.NewBuffer([]byte(cfg.Body)))
+				req, err := http.NewRequest(testRequest.Method, testRequest.Endpoint, bytes.NewBuffer([]byte(testRequest.Body)))
 				if err != nil {
-					results <- Result{Error: err.Error()}
+					results <- models.RequestResult{Error: err.Error()}
 					continue
 				}
-				for k, v := range cfg.Headers {
+				for k, v := range testRequest.Headers {
 					req.Header.Set(k, v)
 				}
 				resp, err := client.Do(req)
 				duration := time.Since(start)
 				if err != nil {
-					results <- Result{Error: err.Error(), Duration: duration}
+					results <- models.RequestResult{Error: err.Error(), Duration: duration}
 					continue
 				}
-				results <- Result{StatusCode: resp.StatusCode, Duration: duration}
+				results <- models.RequestResult{StatusCode: resp.StatusCode, Duration: duration}
 				resp.Body.Close()
 			}
 		}(requestsForThisGoroutine)
@@ -100,7 +73,7 @@ func ExecuteTest(cfg config.Config) TestSummary {
 	var success, failures int
 	var totalDuration time.Duration
 	statusCodes := make(map[int]int)
-	var testResults []Result
+	var testResults []models.RequestResult
 
 	for result := range results {
 		testResults = append(testResults, result)
@@ -121,11 +94,11 @@ func ExecuteTest(cfg config.Config) TestSummary {
 		averageTime = totalDuration / time.Duration(success)
 	}
 
-	successRate := (float64(success) / float64(cfg.Requests)) * 100
-	failureRate := (float64(failures) / float64(cfg.Requests)) * 100
+	successRate := (float64(success) / float64(testRequest.Requests)) * 100
+	failureRate := (float64(failures) / float64(testRequest.Requests)) * 100
 
-	return TestSummary{
-		TotalRequests: cfg.Requests,
+	return models.TestSummary{
+		TotalRequests: testRequest.Requests,
 		Success:       success,
 		Failures:      failures,
 		SuccessRate:   successRate,
@@ -137,19 +110,20 @@ func ExecuteTest(cfg config.Config) TestSummary {
 	}
 }
 
-func RunTest(cfg config.Config, id primitive.ObjectID) TestResult {
-	summary := ExecuteTest(cfg)
+func RunTest(testRequest models.TestRequest, id primitive.ObjectID) models.TestResult {
+	summary := ExecuteTest(testRequest)
 
-	result := TestResult{
-		ID:          id,
-		Endpoint:    cfg.Endpoint,
-		Concurrency: cfg.Concurrency,
-		Requests:    cfg.Requests,
-		Method:      cfg.Method,
-		Headers:     cfg.Headers,
-		Body:        cfg.Body,
-		TestSummary: summary,
-		CreatedAt:   time.Now(),
+	result := models.TestResult{
+		ID:            primitive.NewObjectID(),
+		TestRequestID: id,
+		Endpoint:      testRequest.Endpoint,
+		Concurrency:   testRequest.Concurrency,
+		Requests:      testRequest.Requests,
+		Method:        testRequest.Method,
+		Headers:       testRequest.Headers,
+		Body:          testRequest.Body,
+		TestSummary:   summary,
+		CreatedAt:     time.Now(),
 	}
 
 	// Save to MongoDB
